@@ -11,10 +11,10 @@ public class GameManager : MonoBehaviour
     private Button createLobbyButton;
     private Button joinExistingButton;
     private Button refreshLobbiesButton;
-
+    private Button leaveLobbyButton;
+    
     private string currentLobbyId;
     private bool isLobbyHost = false;
-    private TMP_Text createButtonText;
 
     // Avatar bar
     private Canvas avatarCanvas;
@@ -70,7 +70,6 @@ public class GameManager : MonoBehaviour
 
         if (NetworkManager.singleton != null)
         {
-            Debug.Log("[GameManager] NetworkManager.singleton found");
             var transport = NetworkManager.singleton.GetComponent<WavedashTransport>();
             if (transport != null)
                 transport.OnHostMigration += OnHostMigration;
@@ -83,11 +82,7 @@ public class GameManager : MonoBehaviour
         SceneManager.sceneLoaded += OnSceneLoaded;
 
         CreateAvatarBar();
-
-        Debug.Log("[GameManager] Calling ReadyForEvents...");
         Wavedash.SDK.ReadyForEvents();
-        Debug.Log("[GameManager] ReadyForEvents done, calling UpdateUI and CheckForLobbies");
-
         UpdateUI();
         CheckForLobbies();
     }
@@ -108,10 +103,17 @@ public class GameManager : MonoBehaviour
     {
         if (scene.path.EndsWith("OfflineScene.unity"))
         {
-            Debug.Log("[GameManager] Offline scene loaded, re-binding UI");
+            Debug.Log("[GameManager] Offline scene loaded");
             FindAndBindUI();
             UpdateUI();
             CheckForLobbies();
+        }
+        else if (scene.path.EndsWith("OnlineScene.unity"))
+        {
+            Debug.Log("[GameManager] Online scene loaded");
+            CreateLeaveLobbyUI();
+            FindAndBindUI();
+            UpdateUI();
         }
     }
 
@@ -120,7 +122,7 @@ public class GameManager : MonoBehaviour
         createLobbyButton = null;
         joinExistingButton = null;
         refreshLobbiesButton = null;
-        createButtonText = null;
+        leaveLobbyButton = null;
 
         var buttons = FindObjectsByType<Button>(FindObjectsSortMode.None);
         foreach (var btn in buttons)
@@ -136,14 +138,14 @@ public class GameManager : MonoBehaviour
                 case "RefreshLobbiesButton":
                     refreshLobbiesButton = btn;
                     break;
+                case "LeaveLobbyButton":
+                    leaveLobbyButton = btn;
+                    break;
             }
         }
 
-        Debug.Log($"[GameManager] FindAndBindUI: create={createLobbyButton != null}, join={joinExistingButton != null}, refresh={refreshLobbiesButton != null}");
-
         if (createLobbyButton != null)
         {
-            createButtonText = createLobbyButton.GetComponentInChildren<TMP_Text>();
             createLobbyButton.onClick.RemoveAllListeners();
             createLobbyButton.onClick.AddListener(OnCreateLobbyClicked);
         }
@@ -158,6 +160,12 @@ public class GameManager : MonoBehaviour
         {
             refreshLobbiesButton.onClick.RemoveAllListeners();
             refreshLobbiesButton.onClick.AddListener(OnRefreshLobbiesClicked);
+        }
+
+        if (leaveLobbyButton != null)
+        {
+            leaveLobbyButton.onClick.RemoveAllListeners();
+            leaveLobbyButton.onClick.AddListener(OnLeaveLobbyClicked);
         }
     }
 
@@ -218,34 +226,10 @@ public class GameManager : MonoBehaviour
 
     async void OnCreateLobbyClicked()
     {
-        Debug.Log("[GameManager] Create/Leave button clicked");
         try
         {
-            if (currentLobbyId != null)
-            {
-                StopNetwork();
-                Debug.Log("[GameManager] Calling LeaveLobby...");
-                string left = await Wavedash.SDK.LeaveLobby(currentLobbyId);
-                if (left != null)
-                {
-                    Debug.Log($"Left lobby: {left}");
-                    currentLobbyId = null;
-                    isLobbyHost = false;
-                    UpdateUI();
-                    ClearAvatars();
-                    CheckForLobbies();
-                }
-                else
-                {
-                    Debug.Log("Failed to leave lobby");
-                }
-            }
-            else
-            {
-                Debug.Log("[GameManager] Calling CreateLobby...");
-                string lobbyId = await Wavedash.SDK.CreateLobby(WavedashConstants.LobbyVisibility.PUBLIC);
-                Debug.Log($"Created lobby: {lobbyId}");
-            }
+             string lobbyId = await Wavedash.SDK.CreateLobby(WavedashConstants.LobbyVisibility.PUBLIC);
+            // Join logic handled in OnLobbyJoined
         }
         catch (System.Exception e)
         {
@@ -253,19 +237,42 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    async void OnJoinExistingClicked()
+    async void OnLeaveLobbyClicked()
     {
-        Debug.Log("[GameManager] Join button clicked");
+        if (currentLobbyId == null) return;
+
         try
         {
-            Debug.Log("[GameManager] Calling ListAvailableLobbies...");
+            StopNetwork();
+            string left = await Wavedash.SDK.LeaveLobby(currentLobbyId);
+            if (left != null)
+            {
+                currentLobbyId = null;
+                isLobbyHost = false;
+                UpdateUI();
+                ClearAvatars();
+            }
+            else
+            {
+                Debug.Log("Failed to leave lobby");
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"[GameManager] OnLeaveLobbyClicked error: {e}");
+        }
+    }
+
+    async void OnJoinExistingClicked()
+    {
+        try
+        {
             var lobbies = await Wavedash.SDK.ListAvailableLobbies();
             if (lobbies != null && lobbies.Count > 0)
             {
                 string lobbyId = lobbies[0]["lobbyId"].ToString();
-                Debug.Log($"[GameManager] Calling JoinLobby({lobbyId})...");
                 bool joined = await Wavedash.SDK.JoinLobby(lobbyId);
-                Debug.Log(joined ? $"Joined lobby: {lobbyId}" : $"Failed to join lobby: {lobbyId}");
+                // Join logic handled in OnLobbyJoined
             }
             else
             {
@@ -280,7 +287,6 @@ public class GameManager : MonoBehaviour
 
     void OnRefreshLobbiesClicked()
     {
-        Debug.Log("[GameManager] Refresh button clicked");
         CheckForLobbies();
     }
 
@@ -288,10 +294,8 @@ public class GameManager : MonoBehaviour
     {
         try
         {
-            Debug.Log("[GameManager] Calling ListAvailableLobbies...");
             var lobbies = await Wavedash.SDK.ListAvailableLobbies();
             bool hasLobbies = lobbies != null && lobbies.Count > 0;
-            Debug.Log($"Found {lobbies?.Count ?? 0} lobbies");
             if (joinExistingButton != null)
                 joinExistingButton.interactable = hasLobbies && currentLobbyId == null;
         }
@@ -305,14 +309,57 @@ public class GameManager : MonoBehaviour
     {
         bool inLobby = currentLobbyId != null;
 
-        if (createButtonText != null)
-            createButtonText.text = inLobby ? "Leave Lobby" : "Create Lobby";
+        if (createLobbyButton != null)
+            createLobbyButton.interactable = !inLobby;
 
         if (joinExistingButton != null)
             joinExistingButton.interactable = !inLobby;
 
         if (refreshLobbiesButton != null)
             refreshLobbiesButton.interactable = !inLobby;
+
+        if (leaveLobbyButton != null)
+            leaveLobbyButton.interactable = inLobby;
+    }
+
+    // --- Leave Lobby UI (Online Scene) ---
+
+    void CreateLeaveLobbyUI()
+    {
+        var canvasGo = new GameObject("LeaveLobbyCanvas");
+        var canvas = canvasGo.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 100;
+        canvasGo.AddComponent<CanvasScaler>();
+        canvasGo.AddComponent<GraphicRaycaster>();
+
+        var btnGo = new GameObject("LeaveLobbyButton");
+        btnGo.transform.SetParent(canvasGo.transform, false);
+
+        var btnRect = btnGo.AddComponent<RectTransform>();
+        btnRect.anchorMin = new Vector2(0, 1);
+        btnRect.anchorMax = new Vector2(0, 1);
+        btnRect.pivot = new Vector2(0, 1);
+        btnRect.anchoredPosition = new Vector2(20, -20);
+        btnRect.sizeDelta = new Vector2(200, 50);
+
+        var btnImage = btnGo.AddComponent<Image>();
+        btnImage.color = new Color(0.8f, 0.2f, 0.2f, 1f);
+
+        btnGo.AddComponent<Button>();
+
+        var textGo = new GameObject("Text");
+        textGo.transform.SetParent(btnGo.transform, false);
+        var textRect = textGo.AddComponent<RectTransform>();
+        textRect.anchorMin = Vector2.zero;
+        textRect.anchorMax = Vector2.one;
+        textRect.sizeDelta = Vector2.zero;
+
+        var tmp = textGo.AddComponent<TextMeshProUGUI>();
+        tmp.text = "Leave Lobby";
+        tmp.fontSize = 24;
+        tmp.alignment = TextAlignmentOptions.Center;
+        tmp.color = Color.white;
     }
 
     // --- Avatar Bar ---
