@@ -40,26 +40,14 @@ public class GameManager : MonoBehaviour
     {
         Wavedash.SDK.Init(new Dictionary<string, object>
         {
-            { "debug", true },
-            {
-                "p2p",
-                new Dictionary<string, object>
-                {
-                    { "maxPeers", 8 },
-                    { "messageSize", 2 * 1024 },
-                    { "maxIncomingMessages", 1024 }
-                }
-            }
+            { "debug", true }
         });
         Debug.Log("WavedashSDK Initialized");
 
-        if (Wavedash.SDK.IsReady())
+        var user = Wavedash.SDK.GetUser();
+        if (user != null)
         {
-            var user = Wavedash.SDK.GetUser();
-            if (user != null)
-            {
-                Debug.Log($"Playing as: {user["username"]}");
-            }
+            Debug.Log($"Playing as: {user["username"]}");
         }
 
         FindAndBindUI();
@@ -82,7 +70,6 @@ public class GameManager : MonoBehaviour
         SceneManager.sceneLoaded += OnSceneLoaded;
 
         CreateAvatarBar();
-        Wavedash.SDK.ReadyForEvents();
         UpdateUI();
         CheckForLobbies();
     }
